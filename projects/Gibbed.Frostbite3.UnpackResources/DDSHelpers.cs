@@ -35,6 +35,7 @@ namespace Gibbed.Frostbite3.UnpackResources
             {
                 case TextureFormat.BC1_UNORM:
                 case TextureFormat.BC1_SRGB:
+                case TextureFormat.BC1A_SRGB:
                 {
                     return 0x31545844; // 'DXT1'
                 }

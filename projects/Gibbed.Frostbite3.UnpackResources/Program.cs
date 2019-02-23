@@ -24,6 +24,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using Gibbed.Frostbite3.Common;
 using Gibbed.Frostbite3.ResourceFormats;
 using Gibbed.Frostbite3.Unbundling;
@@ -57,7 +58,6 @@ namespace Gibbed.Frostbite3.UnpackResources
 
         public static void Main(string[] args)
         {
-            bool convertTextures = false;
             bool noPatch = false;
             bool noCatch = false;
             int logLevelOrdinal = 3;
@@ -65,8 +65,6 @@ namespace Gibbed.Frostbite3.UnpackResources
 
             var options = new OptionSet()
             {
-                { "t|convert-textures", "convert textures", v => convertTextures = v != null },
-                { "no-patch", "don't use patch data", v => noPatch = v != null },
                 { "no-catch", "don't catch exceptions when loading data", v => noCatch = v != null },
                 { "v|verbose", "increase log level (-v/-vv/-vvv)", v => IncreaseLogLevel(v, ref logLevelOrdinal) },
                 { "h|help", "show this message and exit", v => showHelp = v != null },
@@ -88,7 +86,7 @@ namespace Gibbed.Frostbite3.UnpackResources
 
             if (extras.Count < 1 || extras.Count > 2 || showHelp == true)
             {
-                Console.WriteLine("Usage: {0} [OPTIONS]+ input_[sb|toc] [output_dir]", GetExecutableName());
+                Console.WriteLine("Usage: {0} [OPTIONS]+ game_dir [output_dir]", GetExecutableName());
                 Console.WriteLine();
                 Console.WriteLine("Options:");
                 options.WriteOptionDescriptions(Console.Out);
@@ -97,101 +95,90 @@ namespace Gibbed.Frostbite3.UnpackResources
 
             LogHelper.SetConfiguration(NLog.LogLevel.FromOrdinal(logLevelOrdinal));
 
-            var inputPath = extras[0];
-            var outputBasePath = extras.Count > 1 ? extras[1] : Path.ChangeExtension(inputPath, null) + "_res_unpack";
+            var outputBasePath = extras.Count > 1 ? extras[1] : "res_unpack";
 
-            string superbundleName;
-            var dataBasePath = Discovery.FindBasePath(inputPath, out superbundleName);
-            if (string.IsNullOrEmpty(dataBasePath) == true)
+            List<string> files = Directory.GetFiles(extras[0], "*.*",
+                SearchOption.AllDirectories).Where(s => s.EndsWith(".toc", StringComparison.OrdinalIgnoreCase)).ToList();
+
+            for (int i = 0; i < files.Count; i++)
             {
-                Logger.Error("Failed to discover base game path.");
-                return;
-            }
-
-            var dataManager = DataManager.Initialize(dataBasePath, noPatch);
-            if (dataManager == null)
-            {
-                Logger.Fatal("Could not initialize superbundle manager.");
-                return;
-            }
-
-            var extensionsById = ResourceTypes.GetExtensions();
-
-            var superbundle = dataManager.MountSuperbundle(superbundleName);
-
-            foreach (var resourceInfo in superbundle.Bundles
-                                                    .Where(bi => bi.Resources != null)
-                                                    .SelectMany(bi => bi.Resources)
-                                                    .OrderBy(bi => bi.Name))
-            {
-                using (var data = new MemoryStream())
+                var inputPath = files[i];
+                string superbundleName;
+                var dataBasePath = Discovery.FindBasePath(inputPath, out superbundleName);
+                if (string.IsNullOrEmpty(dataBasePath) == true)
                 {
-                    Logger.Info(resourceInfo.Name);
+                    Logger.Error("Failed to discover base game path.");
+                    return;
+                }
+                Console.WriteLine("----- " + (i + 1) + " of " + files.Count + " - " + Path.GetFileName(inputPath) + " ----");
+                Thread.Sleep(1000);
+                var dataManager = DataManager.Initialize(dataBasePath, noPatch);
+                if (dataManager == null)
+                {
+                    Logger.Fatal("Could not initialize superbundle manager.");
+                    return;
+                }
 
-                    if (noCatch == true)
+                var extensionsById = ResourceTypes.GetExtensions();
+
+                var superbundle = dataManager.MountSuperbundle(superbundleName);
+                if (superbundle == null)
+                    continue;
+
+                foreach (var resourceInfo in superbundle.Bundles
+                                                        .Where(bi => bi.Resources != null)
+                                                        .SelectMany(bi => bi.Resources)
+                                                        .OrderBy(bi => bi.Name))
+                {
+                    using (var data = new MemoryStream())
                     {
-                        dataManager.LoadData(resourceInfo, data);
-                        data.Position = 0;
-                    }
-                    else
-                    {
-                        try
+                        Logger.Info(resourceInfo.Name);
+
+                        if (noCatch == true)
                         {
                             dataManager.LoadData(resourceInfo, data);
                             data.Position = 0;
                         }
-                        catch (ChunkCryptoKeyMissingException e)
-                        {
-                            Logger.Warn("Cannot decrypt '{0}' without crypto key '{1}'.",
-                                        resourceInfo.Name,
-                                        e.KeyId);
-                            continue;
-                        }
-                        catch (Exception e)
-                        {
-                            Logger.Warn(e, "Exception while loading '{0}':", resourceInfo.Name);
-                            continue;
-                        }
-                    }
-
-                    var outputName = Helpers.FilterPath(resourceInfo.Name);
-                    var outputPath = Path.Combine(outputBasePath, outputName + ".dummy");
-                    var outputParentPath = Path.GetDirectoryName(outputPath);
-                    if (string.IsNullOrEmpty(outputParentPath) == false)
-                    {
-                        Directory.CreateDirectory(outputParentPath);
-                    }
-
-                    bool wasConverted = false;
-                    if (convertTextures == true && resourceInfo.ResourceType == ResourceTypes.Texture)
-                    {
-                        outputPath = Path.Combine(outputBasePath, outputName + ".dds");
-                        wasConverted = ConvertTexture(data, outputPath, dataManager);
-                    }
-
-                    if (wasConverted == false)
-                    {
-                        string extension;
-                        if (extensionsById.TryGetValue(resourceInfo.ResourceType, out extension) == true)
-                        {
-                            extension = "." + extension;
-                        }
                         else
                         {
-                            extension = ".#" + resourceInfo.ResourceType.ToString("X8");
+                            try
+                            {
+                                dataManager.LoadData(resourceInfo, data);
+                                data.Position = 0;
+                            }
+                            catch (ChunkCryptoKeyMissingException e)
+                            {
+                                Logger.Warn("Cannot decrypt '{0}' without crypto key '{1}'.",
+                                            resourceInfo.Name,
+                                            e.KeyId);
+                                continue;
+                            }
+                            catch (Exception e)
+                            {
+                                Logger.Warn(e, "Exception while loading '{0}':", resourceInfo.Name);
+                                continue;
+                            }
                         }
 
-                        outputPath = Path.Combine(outputBasePath, outputName + extension);
-                        using (var output = File.Create(outputPath))
+                        if (resourceInfo.ResourceType != ResourceTypes.Texture)
+                            continue;
+
+                        var outputName = Helpers.FilterPath(resourceInfo.Name);
+                        var outputPath = Path.Combine(outputBasePath, outputName + ".dummy");
+                        var outputParentPath = Path.GetDirectoryName(outputPath);
+                        if (string.IsNullOrEmpty(outputParentPath) == false)
                         {
-                            data.Position = 0;
-                            output.WriteFromStream(data, data.Length);
+                            Directory.CreateDirectory(outputParentPath);
                         }
+
+                        outputPath = Path.Combine(outputBasePath, outputName + ".dds");
+                        Console.WriteLine(outputPath);
+                        ConvertTexture(data, outputPath, dataManager);
                     }
                 }
-            }
 
-            dataManager.Dispose();
+                dataManager.Dispose();
+            }
         }
 
         private static bool ConvertTexture(MemoryStream data,
@@ -208,6 +195,7 @@ namespace Gibbed.Frostbite3.UnpackResources
             if (textureHeader.Unknown10 != 0 ||
                 (textureHeader.Flags != TextureFlags.None &&
                  textureHeader.Flags != TextureFlags.Unknown0 &&
+                 textureHeader.Flags != TextureFlags.Unknown2 &&
                  textureHeader.Flags != (TextureFlags.Unknown0 | TextureFlags.Unknown3) &&
                  textureHeader.Flags != TextureFlags.Unknown5) ||
                 textureHeader.Unknown1C != 1)
