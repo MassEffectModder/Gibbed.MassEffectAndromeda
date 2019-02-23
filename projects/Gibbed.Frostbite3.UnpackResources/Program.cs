@@ -121,7 +121,15 @@ namespace Gibbed.Frostbite3.UnpackResources
 
                 var extensionsById = ResourceTypes.GetExtensions();
 
-                var superbundle = dataManager.MountSuperbundle(superbundleName);
+                VfsFormats.SuperbundleFile superbundle = null;
+                try
+                {
+                    superbundle = dataManager.MountSuperbundle(superbundleName);
+                }
+                catch
+                {
+                    superbundle = null;
+                }
                 if (superbundle == null)
                     continue;
 
