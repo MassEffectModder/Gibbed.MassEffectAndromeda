@@ -108,7 +108,7 @@ namespace Gibbed.Frostbite3.UnpackResources
                 if (string.IsNullOrEmpty(dataBasePath) == true)
                 {
                     Logger.Error("Failed to discover base game path.");
-                    return;
+                    continue;
                 }
                 Console.WriteLine("----- " + (i + 1) + " of " + files.Count + " - " + Path.GetFileName(inputPath) + " ----");
                 Thread.Sleep(1000);
@@ -116,7 +116,7 @@ namespace Gibbed.Frostbite3.UnpackResources
                 if (dataManager == null)
                 {
                     Logger.Fatal("Could not initialize superbundle manager.");
-                    return;
+                    continue;
                 }
 
                 var extensionsById = ResourceTypes.GetExtensions();
